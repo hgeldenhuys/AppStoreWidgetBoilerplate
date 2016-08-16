@@ -33,13 +33,9 @@ define([
     "dojo/text",
     "dojo/html",
     "dojo/_base/event",
-
-    "WidgetName/lib/jquery-1.11.2",
     "dojo/text!WidgetName/widget/template/WidgetName.html"
-], function (declare, _WidgetBase, _TemplatedMixin, dom, dojoDom, dojoProp, dojoGeometry, dojoClass, dojoStyle, dojoConstruct, dojoArray, dojoLang, dojoText, dojoHtml, dojoEvent, _jQuery, widgetTemplate) {
+], function (declare, _WidgetBase, _TemplatedMixin, dom, dojoDom, dojoProp, dojoGeometry, dojoClass, dojoStyle, dojoConstruct, dojoArray, dojoLang, dojoText, dojoHtml, dojoEvent, widgetTemplate) {
     "use strict";
-
-    var $ = _jQuery.noConflict(true);
 
     // Declare widget's prototype.
     return declare("WidgetName.widget.WidgetName", [ _WidgetBase, _TemplatedMixin ], {
@@ -47,15 +43,10 @@ define([
         templateString: widgetTemplate,
 
         // DOM elements
-        inputNodes: null,
-        colorSelectNode: null,
-        colorInputNode: null,
-        infoTextNode: null,
+        contentNode: null,
 
         // Parameters configured in the Modeler.
-        mfToExecute: "",
-        messageString: "",
-        backgroundColor: "",
+        documentation: "",
 
         // Internal variables. Non-primitives created in the prototype are shared between all widget instances.
         _handles: null,
@@ -65,13 +56,13 @@ define([
 
         // dojo.declare.constructor is called to construct the widget instance. Implement to initialize non-primitive properties.
         constructor: function () {
-            logger.debug(this.id + ".constructor");
+            console.debug(this.id + ".constructor");
             this._handles = [];
         },
 
         // dijit._WidgetBase.postCreate is called after constructing the widget. Implement to do extra setup work.
         postCreate: function () {
-            logger.debug(this.id + ".postCreate");
+            console.debug(this.id + ".postCreate");
 
             if (this.readOnly || this.get("disabled") || this.readonly) {
               this._readOnly = true;
@@ -83,7 +74,7 @@ define([
 
         // mxui.widget._WidgetBase.update is called when context is changed or initialized. Implement to re-render and / or fetch data.
         update: function (obj, callback) {
-            logger.debug(this.id + ".update");
+            console.debug(this.id + ".update");
 
             this._contextObj = obj;
             this._resetSubscriptions();
@@ -92,23 +83,69 @@ define([
 
         // mxui.widget._WidgetBase.enable is called when the widget should enable editing. Implement to enable editing if widget is input widget.
         enable: function () {
-          logger.debug(this.id + ".enable");
+            console.debug(this.id + ".enable");
         },
 
         // mxui.widget._WidgetBase.enable is called when the widget should disable editing. Implement to disable editing if widget is input widget.
         disable: function () {
-          logger.debug(this.id + ".disable");
+            console.debug(this.id + ".disable");
         },
 
         // mxui.widget._WidgetBase.resize is called when the page's layout is recalculated. Implement to do sizing calculations. Prefer using CSS instead.
         resize: function (box) {
-          logger.debug(this.id + ".resize");
+            console.debug(this.id + ".resize");
         },
 
         // mxui.widget._WidgetBase.uninitialize is called when the widget is destroyed. Implement to do special tear-down work.
         uninitialize: function () {
-          logger.debug(this.id + ".uninitialize");
+            console.debug(this.id + ".uninitialize");
             // Clean up listeners, helper objects, etc. There is no need to remove listeners added with this.connect / this.subscribe / this.own.
+        },
+
+        // Fetch all attributes before rendering.
+        // Need to do fetches in case attributes reside on paths
+        // Will construct convenience accessor methods
+        // Be sure to add this.dataObject = {} to update method
+        // Example: if you have this.name Attribute, you will access
+        //  it via this.nameAttribute.get() and this.nameAttribute.get()
+        // attributes: string[]
+        _fetchAttributes: function(attributes) {
+            if (this._contextObj && (attributes.length)) {
+                var attribute = attributes.pop();
+                if (this[attribute].indexOf('/') == -1) {
+                    this._createAttribute(this._contextObj, attribute);
+                } else {
+                    var parts = this.codeAttribute.split('/'),
+                        attribute = parts.pop();
+                    this._contextObj.fetch(this[attribute+'Object'].path, dojo.hitch(this, function (attribute, path, object) {
+                        this._createAttribute(object, attribute, path);
+                    }, attribute. parts.join('/')));
+                }
+                this._fetchAttributes(attributes);
+            // Finished parsing attributes, can render now..
+            } else if (this._contextObj) {
+                this._resetSubscriptions();
+                this._updateRendering();
+            } else {
+                this._attributes = [];
+            }
+        },
+
+        // Helper method to create attribute
+        _createAttribute: function (object, attribute, path) {
+            var attributeObject = {
+                get: function() {
+                    return this.object.get(this.attribute);
+                },
+                set: function(value) {
+                    return this.object.set(this.attribute, value);
+                }
+            };
+            attributeObject.path = path;
+            attributeObject.attribute = attribute;
+            attributeObject.object = object;
+            this[attribute+'Attribute'] = attributeObject;
+            this._attributes.push(attributeObject);
         },
 
         // We want to stop events on a mobile device
@@ -122,53 +159,19 @@ define([
         // Attach events to HTML dom elements
         _setupEvents: function () {
             logger.debug(this.id + "._setupEvents");
-            this.connect(this.colorSelectNode, "change", function (e) {
-                // Function from mendix object to set an attribute.
-                this._contextObj.set(this.backgroundColor, this.colorSelectNode.value);
-            });
 
             this.connect(this.infoTextNode, "click", function (e) {
                 // Only on mobile stop event bubbling!
                 this._stopBubblingEventOnMobile(e);
-
-                // If a microflow has been set execute the microflow on a click.
-                if (this.mfToExecute !== "") {
-                    mx.data.action({
-                        params: {
-                            applyto: "selection",
-                            actionname: this.mfToExecute,
-                            guids: [ this._contextObj.getGuid() ]
-                        },
-                        store: {
-                            caller: this.mxform
-                        },
-                        callback: function (obj) {
-                            //TODO what to do when all is ok!
-                        },
-                        error: dojoLang.hitch(this, function (error) {
-                            logger.error(this.id + ": An error occurred while executing microflow: " + error.description);
-                        })
-                    }, this);
-                }
             });
         },
 
         // Rerender the interface.
         _updateRendering: function (callback) {
-            logger.debug(this.id + "._updateRendering");
-            this.colorSelectNode.disabled = this._readOnly;
-            this.colorInputNode.disabled = this._readOnly;
+            console.debug(this.id + "._updateRendering");
 
             if (this._contextObj !== null) {
-                dojoStyle.set(this.domNode, "display", "block");
 
-                var colorValue = this._contextObj.get(this.backgroundColor);
-
-                this.colorInputNode.value = colorValue;
-                this.colorSelectNode.value = colorValue;
-
-                dojoHtml.set(this.infoTextNode, this.messageString);
-                dojoStyle.set(this.infoTextNode, "background-color", colorValue);
             } else {
                 dojoStyle.set(this.domNode, "display", "none");
             }
@@ -182,14 +185,17 @@ define([
 
         // Handle validations.
         _handleValidation: function (validations) {
-            logger.debug(this.id + "._handleValidation");
+            console.debug(this.id + "._handleValidation");
             this._clearValidations();
 
+            // TODO: Need to review this, not sure how it works with multiple subscriptions
             var validation = validations[0],
                 message = validation.getReasonByAttribute(this.backgroundColor);
 
             if (this._readOnly) {
-                validation.removeAttribute(this.backgroundColor);
+                dojoArray.forEach(this._attributes, dojo.hitch(this, function(validation, attribute) {
+                    validation.removeAttribute(attribute.attribute);
+                }, validation));
             } else if (message) {
                 this._addValidation(message);
                 validation.removeAttribute(this.backgroundColor);
@@ -198,14 +204,14 @@ define([
 
         // Clear validations.
         _clearValidations: function () {
-            logger.debug(this.id + "._clearValidations");
+            console.debug(this.id + "._clearValidations");
             dojoConstruct.destroy(this._alertDiv);
             this._alertDiv = null;
         },
 
         // Show an error message.
         _showError: function (message) {
-            logger.debug(this.id + "._showError");
+            console.debug(this.id + "._showError");
             if (this._alertDiv !== null) {
                 dojoHtml.set(this._alertDiv, message);
                 return true;
@@ -219,7 +225,7 @@ define([
 
         // Add a validation.
         _addValidation: function (message) {
-            logger.debug(this.id + "._addValidation");
+            console.debug(this.id + "._addValidation");
             this._showError(message);
         },
 
@@ -234,34 +240,35 @@ define([
 
         // Reset subscriptions.
         _resetSubscriptions: function () {
-            logger.debug(this.id + "._resetSubscriptions");
+            console.debug(this.id + "._resetSubscriptions");
             // Release handles on previous object, if any.
             this._unsubscribe();
 
             // When a mendix object exists create subscribtions.
             if (this._contextObj) {
+                dojoArray.forEach(this._attributes, dojo.hitch(this, function(attribute) {
+                    var attrHandle = mx.data.subscribe({
+                        guid: attribute.object.getGuid(),
+                        attr: attribute.attribute,
+                        callback: dojoLang.hitch(this, function (guid, attr, attrValue) {
+                            this._updateRendering();
+                        })
+                    });
+                    this._handles.push(attrHandle);
+                }));
                 var objectHandle = mx.data.subscribe({
                     guid: this._contextObj.getGuid(),
                     callback: dojoLang.hitch(this, function (guid) {
                         this._updateRendering();
                     })
                 });
-
-                var attrHandle = mx.data.subscribe({
-                    guid: this._contextObj.getGuid(),
-                    attr: this.backgroundColor,
-                    callback: dojoLang.hitch(this, function (guid, attr, attrValue) {
-                        this._updateRendering();
-                    })
-                });
-
+                this._handles.push(objectHandle);
                 var validationHandle = mx.data.subscribe({
                     guid: this._contextObj.getGuid(),
                     val: true,
                     callback: dojoLang.hitch(this, this._handleValidation)
                 });
-
-                this._handles = [ objectHandle, attrHandle, validationHandle ];
+                this._handles.push(validationHandle);
             }
         }
     });
